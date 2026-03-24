@@ -1,8 +1,10 @@
 # DT2119, Lab 1 Feature Extraction
 
 # Function given by the exercise ----------------------------------
+import numpy as np
+import matplotlib.pyplot as plt
 
-def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000)
+def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000):
     """Computes Mel Filterbank features.
 
     Args:
@@ -55,7 +57,17 @@ def enframe(samples, winlen, winshift):
         numpy array [N x winlen], where N is the number of windows that fit
         in the input signal
     """
-    
+    import math
+    n_samples = len(samples)
+    N = 1+((n_samples - winlen) // winshift)
+    enframed = np.zeros((N,winlen))
+    offset = 0
+    for i in range(N):
+        enframed[i]=samples[offset:offset+winlen]
+        offset = offset + winshift
+    return enframed
+
+
 def preemp(input, p=0.97):
     """
     Pre-emphasis filter.
@@ -69,6 +81,14 @@ def preemp(input, p=0.97):
         output: array of pre-emphasised speech samples
     Note (you can use the function lfilter from scipy.signal)
     """
+    b = [1, -p]  # y[n]=b_0*x[n]+b_1*x[n-a]
+    a = [1]
+    preemph = np.zeros_like(input)
+    for i in range(len(input)):
+        preemph[i] = scipy.signal.lfilter(b,a, input[i])
+    return preemph
+
+#TODO: verify
 
 def windowing(input):
     """
@@ -82,6 +102,15 @@ def windowing(input):
     Note (you can use the function hamming from scipy.signal, include the sym=0 option
     if you want to get the same results as in the example)
     """
+    M = len(input[0])
+    N = len(input)
+    window = scipy.signal.hamming(M,sym=False)
+    windowed = np.zeros_like(input)
+    for i in range(N):
+        windowed[i] = input[i] * window
+    return windowed
+
+#TODO: verify
 
 def powerSpectrum(input, nfft):
     """
@@ -140,3 +169,28 @@ def dtw(x, y, dist):
 
     Note that you only need to define the first output for this exercise.
     """
+
+## ENFRAME VERIFICATION:
+
+example = np.load('lab1_example.npz', allow_pickle=True)['example'].item()
+
+samples = example['samples']
+sr = example['samplingrate']
+enframed = enframe(samples,int(0.020*sr),int(0.01*sr))
+
+# Plot:
+
+N, M = enframed.shape
+# Axes
+t = np.arange(N) * 0.01
+m = np.arange(M) / sr  
+T, M_ = np.meshgrid(t, m)
+plt.figure(figsize=(10, 4))
+plt.pcolormesh(t, np.arange(M)/sr, enframed.T, shading='auto')
+plt.xlabel("Time [s]")
+plt.ylabel("Sample within frame")
+plt.title("Frames of speech signal")
+plt.colorbar(label="Amplitude")
+plt.show()
+
+## PREEMPHASIS VERIFICATION:
