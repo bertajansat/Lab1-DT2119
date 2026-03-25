@@ -3,6 +3,9 @@
 # Function given by the exercise ----------------------------------
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy
+from lab1_tools import trfbank, lifter
+from collections import defaultdict
 
 def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000):
     """Computes Mel Filterbank features.
@@ -88,7 +91,6 @@ def preemp(input, p=0.97):
         preemph[i] = scipy.signal.lfilter(b,a, input[i])
     return preemph
 
-#TODO: verify
 
 def windowing(input):
     """
@@ -104,13 +106,13 @@ def windowing(input):
     """
     M = len(input[0])
     N = len(input)
-    window = scipy.signal.hamming(M,sym=False)
+    window = scipy.signal.windows.hamming(M,sym=False)
     windowed = np.zeros_like(input)
     for i in range(N):
         windowed[i] = input[i] * window
     return windowed
 
-#TODO: verify
+#TODO: plot the window, justify size
 
 def powerSpectrum(input, nfft):
     """
@@ -124,6 +126,11 @@ def powerSpectrum(input, nfft):
         array of power spectra [N x nfft]
     Note: you can use the function fft from scipy.fftpack
     """
+    fft = scipy.fftpack.fft(input, n=nfft)
+    power_spectra = np.absolute(fft)**2
+    return power_spectra
+
+#TODO: answer question, verify!
 
 def logMelSpectrum(input, samplingrate):
     """
@@ -139,6 +146,21 @@ def logMelSpectrum(input, samplingrate):
     Note: use the trfbank function provided in lab1_tools.py to calculate the filterbank shapes and
           nmelfilters
     """
+    nfft = len(input[0])
+    N = len(input)
+    filter_bank = trfbank(samplingrate, nfft)
+    nmelfilters = len(filter_bank)
+
+    log_outputs = np.zeros((N,nmelfilters))
+    for n in range(N):  # For each frame
+        for m in range(nmelfilters):  # For each filter
+            # producte escalar → energia del filtre
+            energy = np.sum(input[n]*filter_bank[m])
+            log_outputs[n, m] = np.log(energy + 1e-12)  # 1e-12 added to avoid log(0)
+
+    return log_outputs
+
+#TODO: Answer to questions
 
 def cepstrum(input, nceps):
     """
@@ -152,6 +174,14 @@ def cepstrum(input, nceps):
         array of Cepstral coefficients [N x nceps]
     Note: you can use the function dct from scipy.fftpack.realtransforms
     """
+    N = len(input)
+    cepstral_coefficients=np.zeros((N,nceps))
+    for i in range(N):
+        all_coefficients = scipy.fftpack.realtransforms.dct(input[i])
+        cepstral_coefficients[i] = all_coefficients[:nceps] # Take only first nceps coefficients
+    return cepstral_coefficients
+
+# TODO: answer questions
 
 def dtw(x, y, dist):
     """Dynamic Time Warping.
@@ -170,27 +200,167 @@ def dtw(x, y, dist):
     Note that you only need to define the first output for this exercise.
     """
 
-## ENFRAME VERIFICATION:
+## 4. Mel Frequency Cepstrum Coefficients step-by-step
+
+## EXAMPLE
 
 example = np.load('lab1_example.npz', allow_pickle=True)['example'].item()
 
 samples = example['samples']
 sr = example['samplingrate']
+
+# Enframed
 enframed = enframe(samples,int(0.020*sr),int(0.01*sr))
+# Preemphasis
+preemphasised = preemp(enframed)
+# Windowing
+windowed = windowing(preemphasised)
+# Power spectrum
+power_spectrum = powerSpectrum(windowed,512)
+# Mel filterbank
+mel_log_outputs = logMelSpectrum(power_spectrum,sr)
+# MFCCs
+cepstral_coefficients = cepstrum(mel_log_outputs,13)
+# Liftering
+lmfcc = lifter(cepstral_coefficients)
 
 # Plot:
-
 N, M = enframed.shape
+Nspec, K = power_spectrum.shape
+
 # Axes
 t = np.arange(N) * 0.01
-m = np.arange(M) / sr  
-T, M_ = np.meshgrid(t, m)
-plt.figure(figsize=(10, 4))
-plt.pcolormesh(t, np.arange(M)/sr, enframed.T, shading='auto')
-plt.xlabel("Time [s]")
+m = np.arange(M) / sr
+f = np.linspace(0, sr/2, K)
+mel_idx = np.arange(mel_log_outputs.shape[1])
+cep_idx = np.arange(cepstral_coefficients.shape[1])
+lcep_idx = np.arange(lmfcc.shape[1])
+plt.figure(figsize=(12, 20)) 
+
+# Enframed
+plt.subplot(7, 1, 1)
+plt.pcolormesh(t, m, enframed.T, shading='auto')
+plt.title("Enframed")
 plt.ylabel("Sample within frame")
-plt.title("Frames of speech signal")
-plt.colorbar(label="Amplitude")
+# Preemph
+plt.subplot(7, 1, 2)
+plt.pcolormesh(t, m, preemphasised.T, shading='auto')
+plt.title("Preemphasised")
+plt.ylabel("Sample within frame")
+# Windowing
+plt.subplot(7, 1, 3)
+plt.pcolormesh(t, m, windowed.T, shading='auto')
+plt.title("Windowed")
+plt.ylabel("Sample within frame")
+# Power spectrum
+plt.subplot(7, 1, 4)
+plt.pcolormesh(t, f, power_spectrum.T, shading='auto')
+plt.title("Power Spectrum")
+plt.ylabel("Frequency [Hz]")
+# Log mel spectrum
+plt.subplot(7, 1, 5)
+plt.pcolormesh(t, mel_idx, mel_log_outputs.T, shading='auto')
+plt.title("Log Mel Spectrum")
+plt.ylabel("Mel filter index")
+# MFCC
+plt.subplot(7, 1, 6)
+plt.pcolormesh(t, cep_idx, cepstral_coefficients.T, shading='auto')
+plt.title("Cepstral Coefficients (MFCC)")
+plt.ylabel("Cepstral coefficient index")
+# LMFCC
+plt.subplot(7, 1, 7)
+plt.pcolormesh(t, lcep_idx, lmfcc.T, shading='auto')
+plt.title("Liftered Cepstral Coefficients (LMFCC)")
+plt.xlabel("Time [s]")
+plt.ylabel("Cepstral coefficient index")
+
+plt.tight_layout()
 plt.show()
 
-## PREEMPHASIS VERIFICATION:
+## DATA
+data = np.load('lab1_data.npz', allow_pickle=True)['data']
+
+lmfcc_list = defaultdict(list)
+
+for utterance in data:
+    samples = utterance['samples']
+    sr = utterance['samplingrate']
+    digit = utterance['digit']
+    gender = utterance['gender']
+    repetition = utterance['repetition']  # 'a' or 'b'
+    
+    # Pipeline
+    enframed = enframe(samples, int(0.020*sr), int(0.01*sr))
+    preemphasised = preemp(enframed)
+    windowed = windowing(preemphasised)
+    power_spectrum = powerSpectrum(windowed, 512)
+    mel_log_outputs = logMelSpectrum(power_spectrum, sr)
+    cepstral_coefficients = cepstrum(mel_log_outputs, 13)
+    lmfcc = lifter(cepstral_coefficients)
+    lmfcc_list[digit].append((lmfcc, gender, repetition))
+
+
+# Plots
+for digit, lmfcc_list in lmfcc_list.items():
+    num_utterances = len(lmfcc_list)
+    plt.figure(figsize=(12, 2*num_utterances))
+    
+    for i, (lmfcc, gender, repetition) in enumerate(lmfcc_list):
+        cep_idx = np.arange(lmfcc.shape[1])
+        t = np.arange(lmfcc.shape[0]) * 0.01
+        
+        plt.subplot(num_utterances, 1, i+1)
+        plt.pcolormesh(t, cep_idx, lmfcc.T, shading='auto')
+        plt.ylabel(f"Rep {repetition}, speaker: {gender}")
+        if i != num_utterances-1:
+            plt.xticks([])
+        else:
+            plt.xlabel("Time [s]")
+    
+    plt.suptitle(f"LMFCCs for digit '{digit}'")
+    plt.tight_layout(rect=[0,0,1,0.95])
+    plt.show()
+
+## 5. Feature Correlation --> revise if it is correct!
+
+lmfcc_array = [] # Should it be MFCC or LMFCC? TODO 
+for i, (lmfcc, gender, repetition) in enumerate(lmfcc_list):
+    lmfcc_array.append(lmfcc)
+lmfcc_array = np.vstack(lmfcc_array) 
+corr_coefficients = np.corrcoef(lmfcc_array,rowvar=False)
+
+mspec_array = []
+for utterance in data:
+    samples = utterance['samples']
+    sr = utterance['samplingrate']
+    
+    # Pipeline
+    enframed = enframe(samples, int(0.020*sr), int(0.01*sr))
+    preemphasised = preemp(enframed)
+    windowed = windowing(preemphasised)
+    power_spectrum = powerSpectrum(windowed, 512)
+    mel_log_outputs = logMelSpectrum(power_spectrum, sr)
+    mspec_array.append(mel_log_outputs)
+mspec_array = np.vstack(mspec_array)
+corr_mspec = np.corrcoef(mspec_array,rowvar=False)
+
+plt.figure(figsize=(12,5))
+
+# LMFCC correlation
+plt.subplot(1, 2, 1)
+plt.pcolormesh(corr_coefficients, shading='auto', cmap='coolwarm', vmin=-1, vmax=1)
+plt.colorbar(label='Correlation coefficient')
+plt.title("LMFCC Correlation")
+plt.xlabel("MFCC coefficient index")
+plt.ylabel("MFCC coefficient index")
+
+# mspec correlation
+plt.subplot(1, 2, 2)
+plt.pcolormesh(corr_mspec, shading='auto', cmap='coolwarm', vmin=-1, vmax=1)
+plt.colorbar(label='Correlation coefficient')
+plt.title("Mel log-spectrum (mspec) Correlation")
+plt.xlabel("Filter index")
+plt.ylabel("Filter index")
+
+plt.tight_layout()
+plt.show()
