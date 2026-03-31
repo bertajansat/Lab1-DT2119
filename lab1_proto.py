@@ -364,3 +364,12 @@ plt.ylabel("Filter index")
 
 plt.tight_layout()
 plt.show()
+
+## 6.  Explore Speech Segments with Clustering
+
+n_components_v = [ 4, 8, 16, 32]
+for i in range(len(n_components_v))
+    model = sklearn.mixture.GaussianMixture(n_components=n_components_v[i])
+    model.fit(mspec_array)
+
+#TODO: FINISH
