@@ -107,12 +107,12 @@ def windowing(input):
     M = len(input[0])
     N = len(input)
     window = scipy.signal.windows.hamming(M,sym=False)
+    plt.plot(window)
     windowed = np.zeros_like(input)
     for i in range(N):
         windowed[i] = input[i] * window
     return windowed
 
-#TODO: plot the window, justify size
 
 def powerSpectrum(input, nfft):
     """
@@ -368,7 +368,7 @@ plt.show()
 ## 6.  Explore Speech Segments with Clustering
 
 n_components_v = [ 4, 8, 16, 32]
-for i in range(len(n_components_v))
+for i in range(len(n_components_v)):
     model = sklearn.mixture.GaussianMixture(n_components=n_components_v[i])
     model.fit(mspec_array)
 
