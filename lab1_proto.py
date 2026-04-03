@@ -181,6 +181,8 @@ def cepstrum(input, nceps):
     return cepstral_coefficients
 
 # TODO: answer questions
+def euclidean_dist(x,y):
+    return  np.linalg.norm(x-y)
 
 def dtw(x, y, dist):
     """Dynamic Time Warping.
@@ -194,11 +196,26 @@ def dtw(x, y, dist):
         d: global distance between the sequences (scalar) normalized to len(x)+len(y)
         LD: local distance between frames from x and y (NxM matrix)
         AD: accumulated distance between frames of x and y (NxM matrix)
-        path: best path thtough AD
+        path: best path through AD
 
     Note that you only need to define the first output for this exercise.
     """
-    #TODO
+    N=len(x)
+    M=len(y)
+    LD = np.zeros((N,M))
+    AD = np.zeros((N,M))
+    # Local euclidean distances matrix
+    for i in range(N):
+        for j in range(M): # i+1 to avoid repetitions
+            LD[i][j]=dist(x[i],y[j])
+
+            if i >= 1 and j >= 1:
+                AD[i][j]=LD[i][j]+min(AD[i-1][j-1],AD[i][j-1],AD[i-1][j])
+            else:
+                AD[i][j]=LD[i][j]
+    d = AD[N-1][M-1] / (N + M)
+    # Best path not implemented --> not necessary
+    return d, LD, AD
 
 ## 4. Mel Frequency Cepstrum Coefficients step-by-step
 
@@ -398,8 +415,8 @@ plt.show()
 
 ## 7. Comparing Utterances
 
-N_utterances = len(data)  # 44
-D = np.zeros((N_utterances, N_utterances))
+#N_utterances = len(data)  # 44
+#D = np.zeros((N_utterances, N_utterances))
 for i in range(len(data)):
     for j in range(i+1, len(data)): # i+1 to avoid repetitions
         samples_1=data[i]['samples']
@@ -407,19 +424,14 @@ for i in range(len(data)):
         lmfcc_1 = mfcc(samples_1, winlen = int(0.020*data[i]['samplingrate']), winshift = int(0.01*data[i]['samplingrate']), nfft=512, nceps=13)
         lmfcc_2 = mfcc(samples_2, winlen = int(0.020*data[j]['samplingrate']), winshift = int(0.01*data[j]['samplingrate']), nfft=512, nceps=13)
         
-        # Local euclidean distances matrix
-        diff = mfcc_1[:, np.newaxis, :] - mfcc_2[np.newaxis, :, :]  # distance for each coefficient (mfcc1[i]-mfcc2[i])
-        dist_matrix = np.linalg.norm(diff, axis=2)  # Euclidean distance of EACH distance vector
-    
-        # DTW
-        D[i][j]= dtw(dist_matrix)
+        d,LD,AD=dtw(lmfcc_1,lmfcc_2, euclidean_dist)
 
 plt.figure(figsize=(8,6))
-plt.pcolormesh(D, cmap='viridis', shading='auto')
+plt.pcolormesh(AD, cmap='viridis', shading='auto')
 plt.colorbar(label='DTW distance')
 plt.title('Pairwise DTW distances between utterances')
 plt.xlabel('Utterance index')
 plt.ylabel('Utterance index')
 plt.show()
 
-# TODO: dtw, hierarchical clustering
+# TODO: hierarchical clusteringm, revise DTW!
