@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import scipy
 from lab1_tools import trfbank, lifter
 from collections import defaultdict
+import sklearn
 
 def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000):
     """Computes Mel Filterbank features.
@@ -160,8 +161,6 @@ def logMelSpectrum(input, samplingrate):
 
     return log_outputs
 
-#TODO: Answer to questions
-
 def cepstrum(input, nceps):
     """
     Calulates Cepstral coefficients from mel spectrum applying Discrete Cosine Transform
@@ -199,6 +198,7 @@ def dtw(x, y, dist):
 
     Note that you only need to define the first output for this exercise.
     """
+    #TODO
 
 ## 4. Mel Frequency Cepstrum Coefficients step-by-step
 
@@ -290,17 +290,12 @@ for utterance in data:
     repetition = utterance['repetition']  # 'a' or 'b'
     
     # Pipeline
-    enframed = enframe(samples, int(0.020*sr), int(0.01*sr))
-    preemphasised = preemp(enframed)
-    windowed = windowing(preemphasised)
-    power_spectrum = powerSpectrum(windowed, 512)
-    mel_log_outputs = logMelSpectrum(power_spectrum, sr)
-    cepstral_coefficients = cepstrum(mel_log_outputs, 13)
-    lmfcc = lifter(cepstral_coefficients)
+    lmfcc = mfcc(samples, winlen = int(0.020*sr), winshift = int(0.01*sr), nfft=512, nceps=13)
     lmfcc_list[digit].append((lmfcc, gender, repetition))
 
 
-# Plots
+# Plots 
+
 for digit, lmfcc_list in lmfcc_list.items():
     num_utterances = len(lmfcc_list)
     plt.figure(figsize=(12, 2*num_utterances))
@@ -323,11 +318,11 @@ for digit, lmfcc_list in lmfcc_list.items():
 
 ## 5. Feature Correlation --> revise if it is correct!
 
-lmfcc_array = [] # Should it be MFCC or LMFCC? TODO 
+lmfcc_array = []  
 for i, (lmfcc, gender, repetition) in enumerate(lmfcc_list):
-    lmfcc_array.append(lmfcc)
-lmfcc_array = np.vstack(lmfcc_array) 
-corr_coefficients = np.corrcoef(lmfcc_array,rowvar=False)
+    lmfcc_array.append(lmfcc) # lmfcc_array = [[T_0 × M],[T_1 × M],[T_2 × M],...]
+lmfcc_array = np.vstack(lmfcc_array) # Concatenate along first axis: NxM 
+corr_coefficients = np.corrcoef(lmfcc_array,rowvar=False) #rowvar=False --> variables are in columns
 
 mspec_array = []
 for utterance in data:
@@ -335,11 +330,7 @@ for utterance in data:
     sr = utterance['samplingrate']
     
     # Pipeline
-    enframed = enframe(samples, int(0.020*sr), int(0.01*sr))
-    preemphasised = preemp(enframed)
-    windowed = windowing(preemphasised)
-    power_spectrum = powerSpectrum(windowed, 512)
-    mel_log_outputs = logMelSpectrum(power_spectrum, sr)
+    mel_log_outputs = mspec(samples, int(0.020*sr), int(0.01*sr))
     mspec_array.append(mel_log_outputs)
 mspec_array = np.vstack(mspec_array)
 corr_mspec = np.corrcoef(mspec_array,rowvar=False)
@@ -367,9 +358,68 @@ plt.show()
 
 ## 6.  Explore Speech Segments with Clustering
 
-n_components_v = [ 4, 8, 16, 32]
+n_components_v = [4, 8, 16, 32]
+posteriors = []  # List of lists for each model
+
 for i in range(len(n_components_v)):
     model = sklearn.mixture.GaussianMixture(n_components=n_components_v[i])
-    model.fit(mspec_array)
+    model.fit(lmfcc_array)
 
-#TODO: FINISH
+    # Temporal list, to save the posteriors obtained for each model
+    posteriors_model = []
+
+    for utterance in data:
+        samples = utterance['samples']
+        lmfccs = mfcc(samples, winlen = int(0.020*sr), winshift = int(0.01*sr), nfft=512, nceps=13)
+        post = model.predict_proba(lmfccs)
+        posteriors_model.append(post)
+
+    posteriors.append(posteriors_model)
+
+# Plot example utterances 16, 17, 38, and 39:
+
+import matplotlib.pyplot as plt
+
+utterances_to_plot = [16, 17, 38, 39]
+n_model = 3  # 32 components 
+
+plt.figure(figsize=(12, 8))
+
+for i, utt_id in enumerate(utterances_to_plot):
+    post = posteriors[n_model][utt_id]  # NxK: frames × components
+    plt.subplot(len(utterances_to_plot), 1, i+1)
+    plt.pcolormesh(post.T, shading='auto', cmap='viridis')  
+    plt.ylabel('GMM component')
+    plt.xlabel('Frame')
+    plt.title(f'Utterance {utt_id} - 32 components')
+
+plt.tight_layout()
+plt.show()
+
+## 7. Comparing Utterances
+
+N_utterances = len(data)  # 44
+D = np.zeros((N_utterances, N_utterances))
+for i in range(len(data)):
+    for j in range(i+1, len(data)): # i+1 to avoid repetitions
+        samples_1=data[i]['samples']
+        samples_2=data[j]['samples']
+        lmfcc_1 = mfcc(samples_1, winlen = int(0.020*data[i]['samplingrate']), winshift = int(0.01*data[i]['samplingrate']), nfft=512, nceps=13)
+        lmfcc_2 = mfcc(samples_2, winlen = int(0.020*data[j]['samplingrate']), winshift = int(0.01*data[j]['samplingrate']), nfft=512, nceps=13)
+        
+        # Local euclidean distances matrix
+        diff = mfcc_1[:, np.newaxis, :] - mfcc_2[np.newaxis, :, :]  # distance for each coefficient (mfcc1[i]-mfcc2[i])
+        dist_matrix = np.linalg.norm(diff, axis=2)  # Euclidean distance of EACH distance vector
+    
+        # DTW
+        D[i][j]= dtw(dist_matrix)
+
+plt.figure(figsize=(8,6))
+plt.pcolormesh(D, cmap='viridis', shading='auto')
+plt.colorbar(label='DTW distance')
+plt.title('Pairwise DTW distances between utterances')
+plt.xlabel('Utterance index')
+plt.ylabel('Utterance index')
+plt.show()
+
+# TODO: dtw, hierarchical clustering
