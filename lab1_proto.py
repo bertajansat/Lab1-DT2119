@@ -1,5 +1,7 @@
 import numpy as np
 from scipy.signal import lfilter
+from scipy.signal.windows import hamming
+from scipy.fft import fft
 import matplotlib.pyplot as plt
 
 ### DT2119, Lab 1 Feature Extraction ###
@@ -57,7 +59,7 @@ def enframe(samples, winlen, winshift):
     Slices the input samples into overlapping windows (using short-time stationarity assumption).
 
     Args:
-        samples: sampled air pressure (sound) values 
+        samples: sampled air pressure oscillations (sound amplitude over time)
         winlen: window length (in nr_samples = window_duration * sampling_rate)
         winshift: shift between consecutive windows (in number of samples)
     Returns:
@@ -70,8 +72,8 @@ def enframe(samples, winlen, winshift):
     N = (len(samples) - winlen) // winshift + 1
 
     # compute frame offsets for sliding-window approach
-    win_idxs = np.arange(winlen)              # indices within a single frame
-    frames_offsets = np.arange(N) * winshift      # indices indicating the start of a frame
+    win_idxs = np.arange(winlen)                     # indices within a single frame
+    frames_offsets = np.arange(N) * winshift         # indices indicating the start of a frame
     frames_idxs = frames_offsets[:, None] + win_idxs[None, :]
 
     return samples[frames_idxs]
@@ -104,29 +106,55 @@ def preemp(input, p=0.97):
 
 def windowing(input):
     """
-    Applies hamming window to the input frames.
+    Applies Hamming window to the input frames.
 
     Args:
-        input: array of speech samples [N x M] where N is the number of frames and
-               M the samples per frame
+        input: (N, winlen) array of speech samples, where N is the number of frames and
+               winlen the samples per frame
     Output:
-        array of windoed speech samples [N x M]
+        (N, winlen) array of windowed speech samples
     Note (you can use the function hamming from scipy.signal, include the sym=0 option
     if you want to get the same results as in the example)
     """
 
-def powerSpectrum(input, nfft):
+    # enframing of original signal corresponds to multiplication with rectangular window
+    # -> likely introduces sharp discontinuity at frame boundaries 
+    # -> spectral leakage since Fourier transform assumes periodicity of frame signal
+    # -> frequency spectrum gets "smeared" with spurious energy across all frequencies
+
+    # Hamming windowing preserves samples around frame center, those near both edges are faded out
+    winlen = input.shape[1]
+    hamming_win = hamming(winlen, sym= False)
+
+    return hamming_win, input * hamming_win
+
+
+def powerSpectrum(input, nfft=512):
     """
     Calculates the power spectrum of the input signal, that is the square of the modulus of the FFT
 
     Args:
-        input: array of speech samples [N x M] where N is the number of frames and
-               M the samples per frame
+        input: (N, winlen) array of speech samples, where N is the number of frames and
+               winlen the samples per frame
         nfft: length of the FFT
     Output:
-        array of power spectra [N x nfft]
+        (N, nFFT) array of power spectra
     Note: you can use the function fft from scipy.fftpack
     """
+
+    # speech sounds fundamentally distinguished by frequency domain content (pitch+timbre)
+    # -> change from time domain to frequency domain needed
+    # -> decompose time signal into sum of periodic functions at different frequencies (Fourier transform)
+    # -> Fourier transform components contain information about how much energy is contained at each frequency
+    # -> phase/timing of each frequency component irrelevant for energy (vanishes with squared magnitude)
+
+    # use Fast Fourier Transform (FFT) algo for computing DFT of each signal frame
+    # -> by Nyquist-Shannon sampling theorem, maximum representable freq is half of sampling rate (i.e. 10k Hz)
+    # -> first 257 FFT bins (including 0 and f_max) are unique, rest is mirrored result (bin resolution of 20k/512)
+    fft_components = fft(input, n=nfft, axis=1)     # since nfft > winlen=400, padding with zeros 
+
+    return np.abs(fft_components)**2
+
 
 def logMelSpectrum(input, samplingrate):
     """
@@ -174,9 +202,8 @@ def dtw(x, y, dist):
     """
 
 
-# Script ----------------------------------------
+# Testing script ----------------------------------------
 
-# enframe testing
 example = np.load('lab1_example.npz', allow_pickle=True)['example'].item()
 
 win_dur = 0.02                              # window/frame duration (in s)
@@ -186,15 +213,31 @@ sampling_rate = example['samplingrate']     # sampling rate (in s)
 win_len = int(win_dur * sampling_rate)           # number of samples per window
 win_shift = int(win_timeshift * sampling_rate)   # number of samples between consecutive windows
 
-frames = enframe(example['samples'], win_len, win_shift)
-# print(f'Enframe results are matching: {np.array_equal(frames,example['frames'])}')
 
+### enframe check
+frames = enframe(example['samples'], win_len, win_shift)
 # fig, ax = plt.subplots()
 # ax.pcolormesh(frames.T)
 # plt.savefig('enframe_test.png')
+# print(f'Enframe results are matching: {np.array_equal(frames, example['frames'])}')
 
 
-
-# pre-emphasis testing
+### pre-emphasis check
 preemph_frames = preemp(frames)
-print(f'Pre-emphasis results are matching: {np.array_equal(preemph_frames,example['preemph'])}')
+# print(f'Pre-emphasis results are matching: {np.array_equal(preemph_frames, example['preemph'])}')
+
+
+### Hamming windowing check
+hamming_win, hamming_frames = windowing(preemph_frames)
+# fig, ax = plt.subplots()
+# ax.plot(list(range(len(hamming_win))), hamming_win)
+# plt.savefig('hamming_test.png')
+# print(f'Hamming windowing results are matching: {np.allclose(hamming_frames, example['windowed'])}')
+
+
+### FFT check
+power_spectrum = powerSpectrum(hamming_frames)
+# fig, ax = plt.subplots()
+# ax.pcolormesh(power_spectrum.T)
+# plt.savefig('fft_test.png')
+# print(f'FFT power spectrum results are matching: {np.allclose(power_spectrum, example['spec'])}')
