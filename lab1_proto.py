@@ -1,8 +1,14 @@
-# DT2119, Lab 1 Feature Extraction
+import numpy as np
+from scipy.signal import lfilter
+import matplotlib.pyplot as plt
+
+### DT2119, Lab 1 Feature Extraction ###
+
 
 # Function given by the exercise ----------------------------------
 
-def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000)
+
+def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000):
     """Computes Mel Filterbank features.
 
     Args:
@@ -42,33 +48,59 @@ def mfcc(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, ncep
     ceps = cepstrum(mspecs, nceps)
     return lifter(ceps, liftercoeff)
 
+
 # Functions to be implemented ----------------------------------
+
 
 def enframe(samples, winlen, winshift):
     """
-    Slices the input samples into overlapping windows.
+    Slices the input samples into overlapping windows (using short-time stationarity assumption).
 
     Args:
-        winlen: window length in samples.
-        winshift: shift of consecutive windows in samples
+        samples: sampled air pressure (sound) values 
+        winlen: window length (in nr_samples = window_duration * sampling_rate)
+        winshift: shift between consecutive windows (in number of samples)
     Returns:
-        numpy array [N x winlen], where N is the number of windows that fit
+        (N, winlen) numpy array, where N is the number of windows that fit
         in the input signal
     """
+
+    # compute number of COMPLETE frames (discarding truncated one at the end)
+    # -> no padding, no partial final frame
+    N = (len(samples) - winlen) // winshift + 1
+
+    # compute frame offsets for sliding-window approach
+    win_idxs = np.arange(winlen)              # indices within a single frame
+    frames_offsets = np.arange(N) * winshift      # indices indicating the start of a frame
+    frames_idxs = frames_offsets[:, None] + win_idxs[None, :]
+
+    return samples[frames_idxs]
+
     
 def preemp(input, p=0.97):
     """
-    Pre-emphasis filter.
+    Pre-emphasis filter. Pre-emphasis boosts higher frequencies since the glottal/voice source
+    (vibration of vocal folds) produces a signal that is richer at lower frequencies. To avoid 
+    leaving the power spectrum skewed towards lower frequencies and capturing important speech 
+    information also at higher frequencies, pre-emphasis is used.
 
     Args:
-        input: array of speech frames [N x M] where N is the number of frames and
-               M the samples per frame
-        p: preemhasis factor (defaults to the value specified in the exercise)
+        input: (N, winlen) array of speech frames, where N is the number of frames and
+               winlen the number of samples per frame
+        p: preemphasis factor (defaults to the value specified in the exercise)
 
     Output:
         output: array of pre-emphasised speech samples
     Note (you can use the function lfilter from scipy.signal)
     """
+
+    # pre-emphasis is first-order (linear), high-pass (allow high freq.) filter
+    # -> emphasize sudden changes (high freq.) and attenuate slow changes (low freq.)
+    # -> relative flattening of spectrum 
+    # -> lfilter coefficients (b, a) chosen to obtain pre-emphasis formula y[n] = x[n] - a*x[n-1]
+    # -> lfilter assumes zero initial conditions for y[0] = x[0]
+    return lfilter(b=(1, -p), a=(1), x=input, axis=1)
+
 
 def windowing(input):
     """
@@ -140,3 +172,29 @@ def dtw(x, y, dist):
 
     Note that you only need to define the first output for this exercise.
     """
+
+
+# Script ----------------------------------------
+
+# enframe testing
+example = np.load('lab1_example.npz', allow_pickle=True)['example'].item()
+
+win_dur = 0.02                              # window/frame duration (in s)
+win_timeshift = 0.01                        # temporal shift between consecutive windows
+sampling_rate = example['samplingrate']     # sampling rate (in s)
+
+win_len = int(win_dur * sampling_rate)           # number of samples per window
+win_shift = int(win_timeshift * sampling_rate)   # number of samples between consecutive windows
+
+frames = enframe(example['samples'], win_len, win_shift)
+# print(f'Enframe results are matching: {np.array_equal(frames,example['frames'])}')
+
+# fig, ax = plt.subplots()
+# ax.pcolormesh(frames.T)
+# plt.savefig('enframe_test.png')
+
+
+
+# pre-emphasis testing
+preemph_frames = preemp(frames)
+print(f'Pre-emphasis results are matching: {np.array_equal(preemph_frames,example['preemph'])}')
