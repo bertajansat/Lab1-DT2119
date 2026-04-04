@@ -4,7 +4,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
-from lab1_tools import trfbank, lifter
+from lab1_tools import trfbank, lifter, tidigit2labels
 from collections import defaultdict
 import sklearn
 
@@ -206,11 +206,15 @@ def dtw(x, y, dist):
     AD = np.zeros((N,M))
     # Local euclidean distances matrix
     for i in range(N):
-        for j in range(M): # i+1 to avoid repetitions
+        for j in range(M): 
             LD[i][j]=dist(x[i],y[j])
 
             if i >= 1 and j >= 1:
                 AD[i][j]=LD[i][j]+min(AD[i-1][j-1],AD[i][j-1],AD[i-1][j])
+            elif i==0 and j >= 1:
+                AD[i][j] = LD[i][j] + AD[i][j-1]
+            elif i>=1 and j==0:
+                AD[i][j] = LD[i][j] + AD[i-1][j]
             else:
                 AD[i][j]=LD[i][j]
     d = AD[N-1][M-1] / (N + M)
@@ -415,8 +419,9 @@ plt.show()
 
 ## 7. Comparing Utterances
 
-#N_utterances = len(data)  # 44
-#D = np.zeros((N_utterances, N_utterances))
+N_utterances = len(data)  # 44
+D = np.zeros((N_utterances, N_utterances))
+
 for i in range(len(data)):
     for j in range(i+1, len(data)): # i+1 to avoid repetitions
         samples_1=data[i]['samples']
@@ -425,13 +430,26 @@ for i in range(len(data)):
         lmfcc_2 = mfcc(samples_2, winlen = int(0.020*data[j]['samplingrate']), winshift = int(0.01*data[j]['samplingrate']), nfft=512, nceps=13)
         
         d,LD,AD=dtw(lmfcc_1,lmfcc_2, euclidean_dist)
+        D[i][j]=d
+        D[j][i]=d # Simmetric matrix
 
 plt.figure(figsize=(8,6))
-plt.pcolormesh(AD, cmap='viridis', shading='auto')
+plt.pcolormesh(D, cmap='viridis', shading='auto')
 plt.colorbar(label='DTW distance')
 plt.title('Pairwise DTW distances between utterances')
 plt.xlabel('Utterance index')
 plt.ylabel('Utterance index')
 plt.show()
 
-# TODO: hierarchical clusteringm, revise DTW!
+# Hierarchical clustering
+
+D_condensed = scipy.spatial.distance.squareform(D) # Condensed distance matrix needed as input to linkage function
+
+Z = scipy.cluster.hierarchy.linkage(D_condensed, method='complete')
+labels = tidigit2labels(data)
+scipy.cluster.hierarchy.dendrogram(Z, labels=labels)
+plt.title('Hierarchical Clustering (DTW distances)')
+plt.xlabel('Utterances')
+plt.ylabel('Distance')
+plt.tight_layout()
+plt.show()
