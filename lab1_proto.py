@@ -1,14 +1,15 @@
 import numpy as np
 from scipy.signal import lfilter
 from scipy.signal.windows import hamming
-from scipy.fft import fft
+from scipy.fft import fft, dct
 import matplotlib.pyplot as plt
 
-### DT2119, Lab 1 Feature Extraction ###
+from lab1_tools import trfbank, lifter
+
+### DT2119, LAB 1 FEATURE EXTRACTION ###
 
 
 # Function given by the exercise ----------------------------------
-
 
 def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, samplingrate=20000):
     """Computes Mel Filterbank features.
@@ -29,6 +30,7 @@ def mspec(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, sam
     windowed = windowing(preemph)
     spec = powerSpectrum(windowed, nfft)
     return logMelSpectrum(spec, samplingrate)
+
 
 def mfcc(samples, winlen = 400, winshift = 200, preempcoeff=0.97, nfft=512, nceps=13, samplingrate=20000, liftercoeff=22):
     """Computes Mel Frequency Cepstrum Coefficients.
@@ -161,28 +163,50 @@ def logMelSpectrum(input, samplingrate):
     Calculates the log output of a Mel filterbank when the input is the power spectrum
 
     Args:
-        input: array of power spectrum coefficients [N x nfft] where N is the number of frames and
+        input: (N, nfft) array of power spectrum coefficients, where N is the number of frames and
                nfft the length of each spectrum
         samplingrate: sampling rate of the original signal (used to calculate the filterbank shapes)
     Output:
-        array of Mel filterbank log outputs [N x nmelfilters] where nmelfilters is the number
+        (N, n_melfilters) array of Mel filterbank log outputs, where n_nmelfilters is the number
         of filters in the filterbank
     Note: use the trfbank function provided in lab1_tools.py to calculate the filterbank shapes and
           nmelfilters
     """
 
+    # previous (linearly spaced) DFT bins treat all frequency equally, unlike human auditory perception!!!
+    # -> Mel filterbank reshapes spectrum to match human perception (logarithmic perception rather than linear)
+    # -> Mel scale roughly linear below 1k Hz and logarithmic above
+    # -> since bank of triangular filters evenly spaced on Mel scale: 
+    #    densely packed narrow filters at low-freq, sparse wide filters at high-freq values on frequency scale
+    # -> each filter acts like weighted average over a certain range of FFT bins (linear frequency scale)
+    mel_filterbank = trfbank(samplingrate, input.shape[1])
+    mel_features = input @ mel_filterbank.T
+
+    return mel_filterbank, np.log(mel_features)   # taking log here is due to logarithmic human loudness perception
+
+
 def cepstrum(input, nceps):
     """
-    Calulates Cepstral coefficients from mel spectrum applying Discrete Cosine Transform
+    Calulates cepstral coefficients from log Mel spectrum applying Discrete Cosine Transform
 
     Args:
-        input: array of log outputs of Mel scale filterbank [N x nmelfilters] where N is the
-               number of frames and nmelfilters the length of the filterbank
+        input: (N, n_melfilters) array of log outputs of Mel scale filterbank, where N is the
+               number of frames and n_melfilters the length of the filterbank
         nceps: number of output cepstral coefficients
     Output:
-        array of Cepstral coefficients [N x nceps]
+        (N, n_ceps) array of cepstral coefficients
     Note: you can use the function dct from scipy.fftpack.realtransforms
     """
+
+    # adjacent Mel spectrum features within a frame are highly correlated (neighbouring filters overlap)
+    # -> Discrete Cosine Transform (DCT) decorrelates these features and makes them independent:
+    #    decomposes log Mel spectrum into set of cosine base functions
+    # -> low-order DCT features capture smooth, broad spectrum shape (vowels vs consonants), high-oder ones 
+    #    the fine rapid fluctuations (noise, speaker-specific pitch harmonics)
+    # -> correlated features would require more expensive modelling (more parameters, heavier training, more data, ...)
+    # -> keeping nceps of Mel features (13 < 40) after DCT results in compression + spectral detail loss in word recognition
+    return dct(input, type=2, axis=1)[:, :nceps]    # no normalisation, default DCT type, only slicing afterwards !
+
 
 def dtw(x, y, dist):
     """Dynamic Time Warping.
@@ -241,3 +265,61 @@ power_spectrum = powerSpectrum(hamming_frames)
 # ax.pcolormesh(power_spectrum.T)
 # plt.savefig('fft_test.png')
 # print(f'FFT power spectrum results are matching: {np.allclose(power_spectrum, example['spec'])}')
+
+
+### Mel scale check
+filterbank, log_mel_spectrum = logMelSpectrum(power_spectrum, sampling_rate)
+
+freqs_axis = sampling_rate / 512 * np.arange(512)
+# fig, ax = plt.subplots(figsize=(10, 4))
+# for i in range(filterbank.shape[0]):
+#     ax.plot(freqs_axis[:257], filterbank[i, :257], linewidth=0.9)
+# ax.set_xlabel('Frequency (Hz)')
+# ax.set_ylabel('Filter amplitude')
+# ax.set_title('Mel filterbank (40 triangular filters on linear frequency scale)')
+# ax.set_xlim(0, 8000)
+# ax.grid(True, alpha=0.3)
+# plt.tight_layout()
+# plt.savefig('filterbank_test.png')
+
+time_axis = np.arange(log_mel_spectrum.shape[0]) * 200 / sampling_rate
+# fig, ax = plt.subplots(figsize=(10, 4))
+# mesh = ax.pcolormesh(time_axis, np.arange(log_mel_spectrum.shape[1]), log_mel_spectrum.T, shading='auto')
+# ax.set_xlabel('Time (s)')
+# ax.set_ylabel('Mel filter index')
+# ax.set_title('Log Mel filterbank spectrum')
+# plt.colorbar(mesh, ax=ax, label='Log energy')
+# plt.tight_layout()
+# plt.savefig('logmelscale_test.png')
+
+# print(f'Log Mel scale results are matching: {np.allclose(log_mel_spectrum, example['mspec'])}')
+
+
+### Cepstrum + liftering check
+mfcc_features = cepstrum(log_mel_spectrum, 13)
+fig, ax = plt.subplots(figsize=(10, 4))
+mesh = ax.pcolormesh(time_axis, np.arange(mfcc_features.shape[1]), mfcc_features.T, shading='auto')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Cepstral coefficient index')
+ax.set_title('MFCC coefficients (before liftering)')
+plt.colorbar(mesh, ax=ax, label='MFCC value')
+plt.tight_layout()
+plt.savefig('mfcc_test.png')
+# print(f'DCT results are matching: {np.allclose(mfcc_features, example['mfcc'])}')
+
+lmfcc_features = lifter(mfcc_features)  # liftering = sinusoidal weighting to equalise feature scales
+fig, ax = plt.subplots(figsize=(10, 4))
+mesh = ax.pcolormesh(time_axis, np.arange(lmfcc_features.shape[1]), lmfcc_features.T, shading='auto')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Cepstral coefficient index')
+ax.set_title('MFCC coefficients (after liftering)')
+plt.colorbar(mesh, ax=ax, label='Liftered MFCC value')
+plt.tight_layout()
+plt.savefig('lmfcc_test.png')
+# print(f"\nLiftering effect (std per coefficient)")      # std brought to approx. same order of magnitude
+# print(f"{'Coeff':<8} {'Before':>10} {'After':>10} {'Ratio':>8}")
+# for i in [0, 4, 8, 12]:
+#     before = mfcc_features[:, i].std()
+#     after = lmfcc_features[:, i].std()
+#     print(f"  {i:<6} {before:>10.2f} {after:>10.2f} {after/before:>8.2f}x")
+# print(f'Liftering results are matching: {np.allclose(lmfcc_features, example['lmfcc'])}')
