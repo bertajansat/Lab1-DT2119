@@ -417,6 +417,7 @@ for i, utt_id in enumerate(utterances_to_plot):
 plt.tight_layout()
 plt.show()
 
+
 ## 7. Comparing Utterances
 
 N_utterances = len(data)  # 44
