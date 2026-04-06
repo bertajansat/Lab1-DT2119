@@ -2,6 +2,9 @@ import numpy as np
 from scipy.signal import lfilter
 from scipy.signal.windows import hamming
 from scipy.fft import fft, dct
+from scipy.spatial import distance_matrix
+from scipy.spatial.distance import squareform
+from scipy.cluster.hierarchy import linkage, dendrogram
 from sklearn.mixture import GaussianMixture
 
 import matplotlib.pyplot as plt
@@ -212,22 +215,65 @@ def cepstrum(input, nceps):
     return dct(input, type=2, axis=1)[:, :nceps]    # no normalisation, default DCT type, only slicing afterwards !
 
 
-def dtw(x, y, dist):
+def dtw(x, y, dist=distance_matrix):
     """Dynamic Time Warping.
 
     Args:
-        x, y: arrays of size NxD and MxD respectively, where D is the dimensionality
-              and N, M are the respective lenghts of the sequences
+        x, y: arrays of shape (N, D) and (M, D) respectively, where D is the dimensionality
+              and N, M are the respective lenghts of the sequences (number of frames)
         dist: distance function (can be used in the code as dist(x[i], y[j]))
 
     Outputs:
         d: global distance between the sequences (scalar) normalized to len(x)+len(y)
         LD: local distance between frames from x and y (NxM matrix)
         AD: accumulated distance between frames of x and y (NxM matrix)
-        path: best path thtough AD
+        path: best path through AD 
 
     Note that you only need to define the first output for this exercise.
     """
+
+    # number of frames in each utterance
+    N, M = x.shape[0], y.shape[0]
+
+    # computation of local distance matrix LD
+    LD = dist(x, y)
+
+    # computation of accumulated distance matrix AD (DTW algorithm)
+    AD = np.full_like(LD, np.inf)
+    AD[0, :] = np.cumsum(LD[0, :])      # first row can only come from stretching y (from left)
+    AD[:, 0] = np.cumsum(LD[:, 0])      # first column can only come from stretching x (from top)
+
+    for i in range(N):
+        for j in range(M):
+            AD[i,j] = LD[i, j] + min(
+                AD[i-1, j],
+                AD[i, j-1],
+                AD[i-1, j-1],
+            )
+
+    global_dist = 1 / (N + M) * AD[-1, -1]
+
+    # backtracing (always picking lowest accumulated cost predecessor)
+    optimal_path = [(N-1, M-1)]
+    i, j = N-1, M-1
+
+    while i > 0 or j > 0:
+        if i == 0:
+            j -= 1
+        elif j == 0:
+            i -= 1
+        else:
+            candidates = [
+                (AD[i-1, j-1], i-1, j-1),  
+                (AD[i-1, j],   i-1, j),     
+                (AD[i, j-1],   i,   j-1),   
+            ]
+            _, i, j = min(candidates, key=lambda c: c[0])
+        optimal_path.append((i, j))
+    
+    optimal_path.reverse()      # to have "start-to-finish" semantics
+
+    return global_dist, LD, AD, optimal_path
 
 
 
@@ -419,7 +465,7 @@ for ax, K in zip(axes, nr_components_list):
 axes[0].set_title(f'GMM posteriors for "{labels[utt_idx]}" – varying number of components')
 axes[-1].set_xlabel('Frame index')
 plt.tight_layout()
-plt.savefig('single_utterance_varying_K.png')
+# plt.savefig('single_utterance_varying_K.png')
 
 
 # 32-component GMM posteriors for the four "seven" utterances
@@ -438,4 +484,51 @@ for ax, utt_idx in zip(axes, seven_indices):
 axes[0].set_title('GMM posteriors (32 components) — four "seven" utterances')
 axes[-1].set_xlabel('Frame index')
 plt.tight_layout()
-plt.savefig('single_K_several_utterances.png')
+# plt.savefig('single_K_several_utterances.png')
+
+
+
+# SECTION 7 --------------
+
+# comparison of utterances might cause problems even when saying the same word (alignment, length, ...)
+# -> dynamic time warping finds optimal (minimum cost) alignment between two sequences
+# -> uses stretching of either utterance or synchronous advancing of both
+
+# computation of pairwise local Euclidean distances and global distances between utterances
+nr_utterances = len(lmfcc_all)
+LD = np.empty((nr_utterances, nr_utterances), dtype=object)
+GD = np.empty((nr_utterances, nr_utterances))
+
+for i in range(nr_utterances):
+    for j in range(i+1, nr_utterances):
+        gd, ld, _, _ = dtw(lmfcc_all[i], lmfcc_all[j])
+
+        LD[i, j] = ld       # 44x44 matrix, each element storing pairwise Euclidean distance matrix 
+        LD[j, i] = ld.T
+
+        GD[i, j] = gd       # 44x44 matrix, each element storing a global distance scalar
+        GD[j, i] = gd
+
+fig, ax = plt.subplots(figsize=(10, 9))
+mesh = ax.pcolormesh(GD, cmap='viridis', shading='auto')
+ax.set_xticks(np.arange(nr_utterances) + 0.5)
+ax.set_yticks(np.arange(nr_utterances) + 0.5)
+ax.set_xticklabels(labels, rotation=90, fontsize=6)
+ax.set_yticklabels(labels, fontsize=6)
+ax.set_title('Pairwise DTW global distance matrix (44 utterances)')
+ax.set_aspect('equal')
+plt.colorbar(mesh, ax=ax, label='DTW distance', shrink=0.8)
+plt.tight_layout()
+plt.savefig('global_distances.png')
+
+
+# performing hierarchical clustering
+GD_condensed = squareform(GD)   # upper triangular matrix elements of pairwise distance matrix
+Z = linkage(GD_condensed, method='complete')
+
+fig, ax = plt.subplots(figsize=(14, 6))
+dendrogram(Z, labels=labels, leaf_rotation=90, leaf_font_size=7, ax=ax)
+ax.set_title('Hierarchical clustering of utterances (complete linkage)')
+ax.set_ylabel('DTW distance')
+plt.tight_layout()
+plt.savefig('dendrogram.png')
